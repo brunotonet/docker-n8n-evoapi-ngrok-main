@@ -1,0 +1,180 @@
+version: 'version: 3.8'
+services:  
+  postgres:
+    image: ankane/pgvector
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env 
+    environment:
+      ## Dados do banco postgres       
+      - POSTGRES_USER=${POSTGRES_USER} 
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - PG_MAX_CONNECTIONS=500
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - minha_rede
+  n8n:
+    image: n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file:
+      - .env   
+    environment:
+      ## 🔐 Criptografia      
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}             # Chave 32 caracteres de criptografia para o n8n https://1password.com/password-generator
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}           # Usuário de autenticação básica
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}   # Senha de autenticação 
+      - N8N_RUNNERS_ENABLED=true      
+      - N8N_BASIC_AUTH_ACTIVE=true
+     
+      ## 🗄️ Banco de Dados (PostgreSQL)                      # Cuidar para todos conectar no mesmo banco
+      - DB_TYPE=postgresdb            
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}                 # Nome do banco de dados
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}                   # Usuário do PostgreSQL
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}           # Senha do PostgreSQL
+
+      ## 📦 Pacotes e Nós Comunitários
+      - N8N_REINSTALL_MISSING_PACKAGES=true
+      - N8N_COMMUNITY_PACKAGES_ENABLED=true
+      - N8N_NODE_PATH=/home/node/.n8n/nodes
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      
+      ## 🔁 Redis (Fila de Execução)
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
+      - QUEUE_BULL_REDIS_DB=6
+      - N8N_EXECUTIONS_MODE=queue
+      - N8N_QUEUE_MODE=redis
+      - N8N_REDIS_HOST=redis
+      - N8N_REDIS_PORT=6379
+      - N8N_ENCRYPTION_KEY=
+      - N8N_GENERIC_SERVER_TRUST_PROXY=true 
+      
+      ## 📝 Histórico
+      ## 📊 Métricas
+      - N8N_METRICS=true
+
+      ## ⏱️ Execuções e Limpeza
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=336
+      
+      ## 🧰 Permissões em Funções Personalizadas
+      - NODE_FUNCTION_ALLOW_BUILTIN=*
+      - NODE_FUNCTION_ALLOW_EXTERNAL=moment,lodash
+
+      ## 🕒 Fuso Horário
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - TZ=America/Sao_Paulo
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - redis  
+      - postgres
+    networks:
+      - minha_rede
+  
+  evolution-api:
+    container_name: lab_evolution_api
+    image: evoapicloud/evolution-api:latest ## Versão atualizada da Evolution API
+    restart: always
+    ports:
+      - 8080:8080
+    volumes:
+      - lab_evolution_instances:/lab_evolution/instances    
+    env_file:
+      - .env     
+    environment:
+      ## ⚙️ Configurações Gerais            
+      - AUTHENTICATION_API_KEY=${AUTHENTICATION_API_KEY}    # Chave de autenticação https://1password.com/password-generator fe238f1a60a33bd33c961d136613d655a75af82f60d2668fcf5c64d344225350 # Chave de 64 caracteres  https://1password.com/password-generator
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+      - DEL_INSTANCE=false
+      - QRCODE_LIMIT=1902
+      - LANGUAGE=pt-BR
+
+      ## 📱 Configuração do Cliente
+      ## Pegue a versão em: https://wppconnect.io/pt-BR/whatsapp-versions/
+      - CONFIG_SESSION_PHONE_VERSION=2.3000.1022594794
+      - CONFIG_SESSION_PHONE_CLIENT=GobbiTonetHUB
+      - CONFIG_SESSION_PHONE_NAME=Chrome
+      
+      ## 🗄️ Configuração do Banco de Dados
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      #- DATABASE_CONNECTION_URI=postgresql://dbapostgres:dbapostgres123@postgres:5432/app_db?schema=public
+      - DATABASE_CONNECTION_URI=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_exchange
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=true
+      - DATABASE_SAVE_DATA_CONTACTS=true
+      - DATABASE_SAVE_DATA_CHATS=true
+      - DATABASE_SAVE_DATA_LABELS=true
+      - DATABASE_SAVE_DATA_HISTORIC=true  
+
+      # Variáveis do Redis (evolution-api)
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/6
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_REDIS_SAVE_INSTANCES=false
+
+      # Variáveis do cache local (evolution-api)
+      - CACHE_LOCAL_ENABLED=false
+
+    networks:
+      - minha_rede    
+    depends_on:
+      - postgres  
+
+  redis:
+    image: redis:alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - minha_rede
+
+  adminer:
+    image: adminer:5.3.0
+    container_name: adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    networks:
+      - minha_rede            
+  ngrok:
+    image: ngrok/ngrok:alpine
+    container_name: ngrok
+    restart: unless-stopped
+    ports:
+      - "4040:4040"  # interface web do ngrok
+    volumes:
+      - ./ngrok.yml:/etc/ngrok.yml
+    command: start --all --config /etc/ngrok.yml
+    depends_on:
+      - n8n
+      - evolution-api
+    networks:
+      - minha_rede
+
+volumes:
+  n8n_data:
+  postgres_data:
+  redis_data:
+  lab_evolution_instances:
+
+networks:
+  minha_rede:
+    driver: bridge
